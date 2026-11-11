@@ -1,0 +1,5 @@
+PySide6>=6.7,<7
+librosa>=0.10.2,<1
+numpy>=1.26,<3
+soundfile>=0.12,<1
+cryptography>=43,<47
