@@ -3,7 +3,8 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QLabel, QPushButton, QLineEdit, QFileDialog, QComboBox,
-    QTextEdit, QDoubleSpinBox, QMessageBox)
+    QTextEdit, QDoubleSpinBox, QMessageBox, QTableWidget, QTableWidgetItem,
+    QHeaderView)
 from core import init_db, register, recordings, verify
 
 DB = Path.home() / '.resonanceauth' / 'references.sqlite3'
@@ -63,6 +64,16 @@ class Window(QMainWindow):
         self.verify_btn = QPushButton('Verify selected recording')
         self.verify_btn.clicked.connect(self.do_verify)
         layout.addWidget(self.verify_btn)
+        self.results_table = QTableWidget(0, 4)
+        self.results_table.setHorizontalHeaderLabels(
+            ['Segment', 'Time range', 'Similarity (cosine)', 'Status'])
+        self.results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.results_table.verticalHeader().setVisible(False)
+        self.results_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch)
+        self.results_table.setVisible(False)
+        layout.addWidget(self.results_table)
         self.output = QTextEdit()
         self.output.setReadOnly(True)
         layout.addWidget(self.output)
@@ -92,6 +103,8 @@ class Window(QMainWindow):
         self.register_btn.setEnabled(False)
         self.verify_btn.setEnabled(False)
         self.output.setPlainText('Processing audio…')
+        self.results_table.setRowCount(0)
+        self.results_table.setVisible(False)
         # Keep references until Qt signals that the thread has stopped.
         self.thread = QThread(self)
         self.worker = Worker(operation)
@@ -140,13 +153,31 @@ class Window(QMainWindow):
 
     @Slot(object)
     def verify_done(self, results):
-        lines = ['Reference signature: VALID (against stored key; artist identity not established)', '']
-        for item in results:
-            score = 'N/A' if item['similarity'] is None else f"{item['similarity']:.3f}"
+        self.results_table.setRowCount(len(results))
+        matched = 0
+        for row, item in enumerate(results):
+            similarity = item['similarity']
+            score = ('N/A' if similarity is None
+                     else f"{similarity:.3f} ({similarity * 100:.1f}%)")
             status = 'MATCH' if item['match'] else 'FLAGGED'
-            lines.append(f"Segment {item['segment']} ({item['start_s']}–{item['end_s']}s): {score} — {status}")
-        lines.append('\nNote: threshold is experimental; alignment and adversarial robustness are not established.')
-        self.output.setPlainText('\n'.join(lines))
+            matched += bool(item['match'])
+            values = (
+                str(item['segment']),
+                f"{item['start_s']}–{item['end_s']} s",
+                score,
+                status,
+            )
+            for col, value in enumerate(values):
+                self.results_table.setItem(row, col, QTableWidgetItem(value))
+        self.results_table.setVisible(True)
+        self.output.setPlainText(
+            'Reference signature: VALID (against stored key; artist identity not established)\n'
+            f'Segments matching: {matched}/{len(results)}\n'
+            'Similarity is a cosine score; the percentage shown is score × 100, '
+            'not an authentication probability.\n'
+            'Note: threshold is experimental; alignment and adversarial '
+            'robustness are not established.'
+        )
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
