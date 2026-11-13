@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, QThread, Signal, Slot
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QLabel, QPushButton, QLineEdit, QFileDialog, QComboBox,
     QTextEdit, QDoubleSpinBox, QMessageBox)
@@ -92,18 +92,26 @@ class Window(QMainWindow):
         self.register_btn.setEnabled(False)
         self.verify_btn.setEnabled(False)
         self.output.setPlainText('Processing audio…')
-        self.thread = QThread()
+        # Keep references until Qt signals that the thread has stopped.
+        self.thread = QThread(self)
         self.worker = Worker(operation)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
+        # Window methods are QObject slots: queued delivery updates widgets only
+        # on the GUI thread, even when emitted from the worker thread.
         self.worker.done.connect(on_done)
-        self.worker.failed.connect(lambda message: self.output.setPlainText('Error: ' + message))
+        self.worker.failed.connect(self.work_failed)
         self.worker.finished.connect(self.thread.quit)
         self.worker.finished.connect(self.worker.deleteLater)
         self.thread.finished.connect(self.thread.deleteLater)
         self.thread.finished.connect(self.enable_buttons)
         self.thread.start()
 
+    @Slot(str)
+    def work_failed(self, message):
+        self.output.setPlainText('Error: ' + message)
+
+    @Slot()
     def enable_buttons(self):
         self.register_btn.setEnabled(True)
         self.verify_btn.setEnabled(True)
@@ -115,6 +123,7 @@ class Window(QMainWindow):
             return
         self.start_work(lambda: register(DB, title, path), self.register_done)
 
+    @Slot(object)
     def register_done(self, result):
         record_id, count = result
         self.refresh()
@@ -129,6 +138,7 @@ class Window(QMainWindow):
         tau = self.threshold.value()
         self.start_work(lambda: verify(DB, record_id, path, tau), self.verify_done)
 
+    @Slot(object)
     def verify_done(self, results):
         lines = ['Reference signature: VALID (against stored key; artist identity not established)', '']
         for item in results:
